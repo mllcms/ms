@@ -5,14 +5,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use rdev::{listen, Event, EventType, Key};
+use tokio::task::spawn_blocking;
 
 use crate::config::{Config, ScriptEvent};
 
 pub mod config;
 pub mod script;
-pub mod sing_app;
+pub mod start;
 pub mod window;
 
 /// 键鼠宏脚本(无反应或需 root 启动)
@@ -24,17 +26,17 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub fn run(self) {
-        match self.sub_command {
-            None => {
-                Run { config: PathBuf::from("./config.toml") }.run();
+    pub async fn run(self) {
+        match self.sub_command.unwrap_or_default() {
+            Commands::Run { config } => {
+                if let Err(err) = run(config).await {
+                    println!("{err}");
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
             }
-            Some(command) => match command {
-                Commands::Run(r) => r.run(),
-                Commands::Event => event(),
-                Commands::Point => point(),
-                Commands::Record => record(),
-            },
+            Commands::Event => event(),
+            Commands::Point => point(),
+            Commands::Record => record(),
         }
     }
 }
@@ -42,7 +44,10 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     /// 运行脚本
-    Run(Run),
+    Run {
+        /// 配置文件所在路径
+        config: PathBuf,
+    },
     /// 获取事件代码
     Event,
     /// 获取鼠标坐标 PS: Alt 输出当前坐标; Escape 清屏
@@ -51,29 +56,9 @@ pub enum Commands {
     Record,
 }
 
-#[derive(Debug, Parser)]
-pub struct Run {
-    /// 配置文件所在路径
-    config: PathBuf,
-}
-
-impl Run {
-    fn run(self) {
-        match Config::load(self.config) {
-            Ok((script, window)) => {
-                tokio::task::spawn_blocking(move || {
-                    if let Err(err) = script.listening() {
-                        println!("监听脚本触发失败: {err:?}");
-                    }
-                    std::thread::sleep(Duration::from_secs(30));
-                });
-                window.run().unwrap();
-            }
-            Err(err) => {
-                println!("加载脚本配置失败: {err}");
-                std::thread::sleep(Duration::from_secs(30));
-            }
-        };
+impl Default for Commands {
+    fn default() -> Self {
+        Self::Run { config: PathBuf::from("config.toml") }
     }
 }
 
@@ -91,6 +76,21 @@ fn event() {
         }
     }
     let _ = listen(callback);
+}
+
+async fn run(path: PathBuf) -> anyhow::Result<()> {
+    let config = Config::parse(path)?;
+    let _only_app = config.start.run().map_err(|err| anyhow!("启动失败: {err}"))?;
+
+    let (script, window) = config.load()?;
+    tokio::select! {
+        res = spawn_blocking(move || script.listening()) => {
+            res?.map_err(|err|anyhow!("监听异常: {err:?}"))
+        }
+        res = spawn_blocking(move || window.run()) => {
+            res?.map_err(|err|anyhow!("窗口异常: {err}"))
+        }
+    }
 }
 
 /// 获取坐标

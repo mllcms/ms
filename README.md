@@ -32,6 +32,8 @@ point = [800, 80]
 font_size = 20
 # 字体颜色
 font_color = [97, 218, 217]
+# 启动设置: prev 运行上次启动的程序; curr 运行本次启动的程序; many 允许多开;
+start = "prev"
 
 # 脚本 XXX
 [[scripts]]

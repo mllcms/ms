@@ -17,6 +17,7 @@ pub struct WindowList {
     pub app_data: AppData,
     pub updater: UnboundedSender<Title>,
 }
+unsafe impl Send for WindowList {}
 
 #[derive(Debug, Clone, Default, Data)]
 pub struct AppData {

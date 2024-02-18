@@ -1,16 +1,17 @@
 use std::{
     collections::{HashMap, HashSet},
-    error::Error,
     fs, mem,
     path::Path,
     sync::Arc,
 };
 
+use anyhow::anyhow;
 use rdev::{Button, EventType, Key};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     script::{Custom, Method, Script, ScriptList, Trigger},
+    start::Restart,
     window::WindowList,
 };
 
@@ -31,6 +32,8 @@ pub struct Config {
     pub font_color: (u8, u8, u8),
     /// 脚本列表
     pub scripts: Vec<ScriptConfig>,
+    /// 启动配置
+    pub start: Restart,
     /// 脚本块
     #[serde(default)]
     pub blocks: HashMap<String, Vec<MethodConfig>>,
@@ -63,29 +66,33 @@ pub struct MethodConfig {
 }
 
 impl Config {
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<(ScriptList, WindowList), Box<dyn Error>> {
+    pub fn parse<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let data = fs::read_to_string(path)?;
-        let mut config: Self = toml::from_str(&data)?;
+        let config: Self = toml::from_str(&data)?;
 
         let hs: HashSet<&str> = config.scripts.iter().map(|m| m.title.as_str()).collect();
         if config.scripts.len() != hs.len() {
-            return Err("title 不可重复".into());
+            return Err(anyhow!("title 不可重复"));
         }
 
-        let mut scripts = vec![];
-        mem::swap(&mut config.scripts, &mut scripts);
+        Ok(toml::from_str(&data)?)
+    }
 
-        let window_list = WindowList::init(config.point, config.font_size, config.font_color);
-        let script_list: Result<Vec<Script>, Box<dyn Error>> = scripts
+    pub fn load(mut self) -> anyhow::Result<(ScriptList, WindowList)> {
+        let mut scripts = vec![];
+        mem::swap(&mut self.scripts, &mut scripts);
+
+        let window_list = WindowList::init(self.point, self.font_size, self.font_color);
+        let script_list: anyhow::Result<Vec<Script>> = scripts
             .into_iter()
             .map(|item| {
                 Ok(Script {
                     title: Arc::new(item.title),
-                    delay: item.delay.unwrap_or(config.delay),
+                    delay: item.delay.unwrap_or(self.delay),
                     trigger: item.trigger.into_iter().map(|m| (m, false)).collect(),
                     repeat: item.repeat,
                     task: None,
-                    methods: Arc::new(config.to_methods(item.methods)?),
+                    methods: Arc::new(self.to_methods(item.methods)?),
                     updater: window_list.updater.clone(),
                 })
             })
@@ -100,7 +107,7 @@ impl Config {
         EventType::MouseMove { x, y }
     }
 
-    fn to_methods(&self, methods: Vec<MethodConfig>) -> Result<Vec<Method>, Box<dyn Error>> {
+    fn to_methods(&self, methods: Vec<MethodConfig>) -> anyhow::Result<Vec<Method>> {
         let mut res = vec![];
         for method in methods {
             match method.event {
@@ -141,10 +148,10 @@ impl Config {
                             let block = self
                                 .blocks
                                 .get(&name)
-                                .ok_or_else(|| format!("没有找到名为 {name:?} 的 block"))?
+                                .ok_or_else(|| anyhow!("没有找到名为 {name:?} 的 block"))?
                                 .to_owned();
                             if block.iter().any(|a| a.event.block_has(&name)) {
-                                return Err(format!("不能引用自身同名 {name:?} 的 block").into());
+                                return Err(anyhow!("不能引用自身同名 {name:?} 的 block"));
                             }
                             block
                         }

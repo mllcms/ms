@@ -1006,6 +1006,7 @@ dependencies = [
 name = "ms"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "druid",
  "rdev",

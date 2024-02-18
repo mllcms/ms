@@ -14,6 +14,7 @@ toml = "0.8.10"
 
 rdev = { version = "0.5.3", features = ["serde", "serialize"] }
 druid = { version = "0.8.3" }
+anyhow = "1.0.79"
 
 [profile.release]
 lto = true
